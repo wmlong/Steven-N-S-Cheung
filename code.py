@@ -1,67 +1,70 @@
-import qrcode
+import os
+import sys
 import base64
 import zlib
-import sys
-import os
+import qrcode
+from math import ceil
 
-# 默认参数
-DEFAULT_OUTPUT = "output_qr.png"
-CHUNK_SIZE = 2850  # Version40-L 大约最大容量（可调）
+# ===== 配置 =====
+CHUNK_SIZE = 2500   # 每张二维码最大 Base64 字符，保守容量
+OUTPUT_DIR = "qr_output"
+# =================
 
-def main():
-    if len(sys.argv) < 2:
-        print(f"用法: python {os.path.basename(sys.argv[0])} <输入文件> [输出二维码文件]")
-        sys.exit(1)
+def read_file(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
 
-    input_file = sys.argv[1]
-    output_file = sys.argv[2] if len(sys.argv) >= 3 else DEFAULT_OUTPUT
-
-    # 读取代码
-    try:
-        with open(input_file, "r", encoding="utf-8") as f:
-            data = f.read()
-    except Exception as e:
-        print(f"读取文件失败: {e}")
-        sys.exit(1)
-
-    # 压缩 + Base64
-    compressed = zlib.compress(data.encode("utf-8"))
+def compress_and_b64(text):
+    compressed = zlib.compress(text.encode("utf-8"))
     b64 = base64.b64encode(compressed).decode("ascii")
+    return b64
 
-    if len(b64) > CHUNK_SIZE:
-        print(f"警告: 内容长度 {len(b64)} 超过单二维码容量限制 {CHUNK_SIZE}")
-        print("建议调大二维码尺寸或拆分为多二维码")
-        sys.exit(2)
+def split_chunks(b64, size):
+    return [b64[i:i+size] for i in range(0, len(b64), size)]
 
-    # 生成二维码
+def make_qr(data, filename):
     qr = qrcode.QRCode(
-        version=40,
+        version=None,
         error_correction=qrcode.constants.ERROR_CORRECT_L,
         box_size=10,
         border=4,
     )
-    qr.add_data(b64)
+    qr.add_data(data)
     qr.make(fit=True)
+    img = qr.make_image()
+    img.save(filename)
 
-    img = qr.make_image(fill_color="black", back_color="white")
-    img.save(output_file)
+def main():
+    if len(sys.argv) < 2:
+        print(f"用法: python {os.path.basename(sys.argv[0])} <输入文件>")
+        sys.exit(1)
 
-    print(f"二维码生成成功: {output_file}")
-    print(f"压缩后长度: {len(b64)} 字符")
+    input_file = sys.argv[1]
+    text = read_file(input_file)
+    b64 = compress_and_b64(text)
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    chunks = split_chunks(b64, CHUNK_SIZE)
+    total = len(chunks)
+    width = len(str(total))
+
+    index_lines = []
+
+    for i, chunk in enumerate(chunks, start=1):
+        header = f"{str(i).zfill(width)}/{str(total).zfill(width)}"
+        payload = header + "\n" + chunk
+        name = f"qr_{str(i).zfill(width)}.png"
+        path = os.path.join(OUTPUT_DIR, name)
+
+        make_qr(payload, path)
+        index_lines.append(f"{header} -> {name}")
+        print(f"生成 {path}")
+
+    with open(os.path.join(OUTPUT_DIR, "index.txt"), "w", encoding="utf-8") as f:
+        f.write("\n".join(index_lines))
+
+    print(f"\n总共 {total} 张二维码，输出目录: {OUTPUT_DIR}")
+    print("按编号顺序打开，每张扫码一次即可")
 
 if __name__ == "__main__":
     main()
-
-
-
-import base64, zlib
-
-with open("scanned.txt", "r", encoding="utf-8") as f:
-    b64 = f.read().strip()
-
-data = zlib.decompress(base64.b64decode(b64)).decode("utf-8")
-
-with open("restored_code.py", "w", encoding="utf-8") as f:
-    f.write(data)
-
-print("恢复成功: restored_code.py")
